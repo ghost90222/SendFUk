@@ -1,0 +1,9 @@
+{
+  "target_platform": "All Platforms (Auto-Detect)",
+  "min_delay": 1.2,
+  "max_delay": 2.8,
+  "batch_limit": 35,
+  "break_duration_s": 180,
+  "verify_layout": true,
+  "always_on_top": true
+}
