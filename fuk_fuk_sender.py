@@ -1,6 +1,12 @@
 """
 ⚡ FUK FUK Sender - Multi-Platform Auto Sender (Instagram, Discord, WhatsApp, Telegram)
-Author: Production Ready Build
+Features:
+  1. 🎯 Lock Window / App: Locks onto your open Chrome tab / WhatsApp / Telegram / Discord.
+  2. ⚡ Cursor Direct Sending: Smooth and reliable typing just like before, zero errors.
+  3. 🛡️ Precise Chat Bar Detection: Verifies chat input bar is visible on screen before sending.
+  4. 🏷️ Real Mention Tagging: Types @username, waits for suggestion popup, commits interactive tag pill.
+  5. 👤 Usernames Pool: One-by-one inline adder + bulk editor.
+  6. 💬 Messages Pool: In-app editor + randomized anti-ban delays and rest breaks.
 """
 
 import sys
@@ -13,13 +19,15 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QDoubleSpinBox, QSpinBox, QCheckBox, QFrame,
-    QGroupBox, QDialog, QTextEdit, QLineEdit, QMessageBox, QComboBox
+    QGroupBox, QDialog, QTextEdit, QLineEdit, QMessageBox, QComboBox,
+    QScrollArea, QGridLayout, QSizePolicy
 )
 from PyQt6.QtGui import QCursor, QFont
 import pyautogui
-import pyperclip
 import keyboard
-import cv2
+
+import native_input
+import window_detector
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "settings.json")
@@ -54,11 +62,11 @@ PLATFORM_TEMPLATES = {
 
 DEFAULT_SETTINGS = {
     "target_platform": "All Platforms (Auto-Detect)",
+    "verify_layout": True,
     "min_delay": 1.2,
     "max_delay": 2.8,
     "batch_limit": 35,
     "break_duration_s": 180,
-    "verify_layout": True,
     "always_on_top": True
 }
 
@@ -172,64 +180,124 @@ class GenericListEditorDialog(QDialog):
         self.item_name = item_name
 
         self.setWindowTitle(title)
-        self.resize(520, 440)
-        self.setStyleSheet("background-color: #12131a; color: #e2e8f0; font-family: 'Segoe UI', sans-serif;")
+        self.setMinimumSize(400, 360)
+        self.resize(520, 460)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #09090b;
+                color: #e4e4e7;
+                font-family: 'Segoe UI', -apple-system, sans-serif;
+            }
+        """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         header_lbl = QLabel(f"Paste your {item_name} below (as JSON array or line-by-line):")
-        header_lbl.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 12px;")
+        header_lbl.setStyleSheet("color: #ffffff; font-weight: 700; font-size: 12px;")
         layout.addWidget(header_lbl)
 
         self.editor = QTextEdit()
         self.editor.setStyleSheet("""
             QTextEdit {
-                background-color: #1a1b26;
-                color: #f1f5f9;
-                border: 1px solid #323547;
+                background-color: #121214;
+                color: #ffffff;
+                border: 1px solid #27272a;
                 border-radius: 8px;
                 padding: 10px;
                 font-family: 'Consolas', 'Courier New', monospace;
                 font-size: 12px;
+                selection-background-color: #ffffff;
+                selection-color: #000000;
+            }
+            QTextEdit:focus {
+                border: 1px solid #ffffff;
             }
         """)
         layout.addWidget(self.editor)
 
         self.lbl_info = QLabel("")
-        self.lbl_info.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_info.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         layout.addWidget(self.lbl_info)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
 
         btn_format = QPushButton("⚡ Format as Clean JSON")
         btn_format.setStyleSheet("""
-            QPushButton { background: #262738; color: #cbd5e1; border: 1px solid #3e4157; border-radius: 6px; padding: 7px 12px; font-size: 11px; }
-            QPushButton:hover { background: #32354b; color: white; }
+            QPushButton {
+                background: #18181b;
+                color: #e4e4e7;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 7px 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #27272a;
+                color: #ffffff;
+                border-color: #52525b;
+            }
         """)
         btn_format.clicked.connect(self.format_as_json)
 
         btn_clear = QPushButton("🗑 Clear All")
         btn_clear.setStyleSheet("""
-            QPushButton { background: #332026; color: #f87171; border: 1px solid #4a2830; border-radius: 6px; padding: 7px 12px; font-size: 11px; }
-            QPushButton:hover { background: #45242c; color: #fca5a5; }
+            QPushButton {
+                background: #18181b;
+                color: #a1a1aa;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 7px 12px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #27272a;
+                color: #ffffff;
+                border-color: #52525b;
+            }
         """)
         btn_clear.clicked.connect(self.clear_all)
 
-        btn_save = QPushButton("💾 Save & Apply")
-        btn_save.setStyleSheet("""
-            QPushButton { background: #10b981; color: white; border: none; border-radius: 6px; padding: 7px 16px; font-weight: bold; font-size: 12px; }
-            QPushButton:hover { background: #059669; }
-        """)
-        btn_save.clicked.connect(self.save_and_close)
-
         btn_cancel = QPushButton("Cancel")
         btn_cancel.setStyleSheet("""
-            QPushButton { background: #262738; color: #94a3b8; border: 1px solid #3e4157; border-radius: 6px; padding: 7px 12px; font-size: 11px; }
-            QPushButton:hover { background: #32354b; color: white; }
+            QPushButton {
+                background: #18181b;
+                color: #a1a1aa;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 7px 14px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #27272a;
+                color: #ffffff;
+                border-color: #52525b;
+            }
         """)
         btn_cancel.clicked.connect(self.reject)
+
+        btn_save = QPushButton("💾 Save && Apply")
+        btn_save.setStyleSheet("""
+            QPushButton {
+                background: #ffffff;
+                color: #000000;
+                border: 1px solid #ffffff;
+                border-radius: 6px;
+                padding: 7px 16px;
+                font-weight: 700;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #e4e4e7;
+                border-color: #e4e4e7;
+            }
+        """)
+        btn_save.clicked.connect(self.save_and_close)
 
         btn_row.addWidget(btn_format)
         btn_row.addWidget(btn_clear)
@@ -324,17 +392,6 @@ class SenderWorker(QThread):
                     pass
         return None
 
-    def paste_and_send(self, text: str):
-        """Pastes message cleanly into active input and sends - zero mouse cursor movement."""
-        pyperclip.copy(text)
-        time.sleep(random.uniform(0.04, 0.08))
-
-        pyautogui.hotkey('ctrl', 'v')
-
-        time.sleep(random.uniform(0.25, 0.48))
-
-        pyautogui.press('enter')
-
     def run(self):
         self.is_running = True
         try:
@@ -346,6 +403,15 @@ class SenderWorker(QThread):
                 self.is_running = False
                 self.finished_loop.emit()
                 return
+
+            cfg = self.config_getter()
+            locked_hwnd = cfg.get("locked_hwnd", "auto")
+
+            # Activate target window ONCE on start if locked
+            if locked_hwnd and locked_hwnd != "auto":
+                self.status_changed.emit("Activating Locked Window...", "#38bdf8")
+                window_detector.focus_window(locked_hwnd)
+                time.sleep(0.4)
 
             self.status_changed.emit("Starting...", "#10b981")
 
@@ -368,13 +434,13 @@ class SenderWorker(QThread):
                         random.shuffle(self.usernames)
                     self.status_changed.emit("Resuming...", "#10b981")
 
-                # 2. Check if Current Tab has Platform Chat Layout (Insta / Discord / WhatsApp / Telegram)
+                # 2. Check if Chat Bar is on screen (Prevents wrong inputs)
                 if verify_layout:
                     self.status_changed.emit("Scanning Screen...", "#38bdf8")
                     detected_platform = self.detect_platform_on_screen(target_platform)
                     if not detected_platform:
                         self.status_changed.emit("Waiting: Chat Not on Screen", "#f59e0b")
-                        self.countdown_tick.emit("Waiting for chat box (Insta / Discord / WA / Telegram)")
+                        self.countdown_tick.emit("Waiting for chat box (Insta / Discord / WA / Telegram)...")
                         time.sleep(0.7)
                         continue
                     else:
@@ -383,29 +449,21 @@ class SenderWorker(QThread):
                 if not self.is_running:
                     break
 
-                # 3. Prepare Message (Prepend Username if available)
+                # 3. Pick random message & username
                 msg = random.choice(self.messages)
-
                 self.usernames = load_usernames_pool()
+                uname = random.choice(self.usernames).strip() if self.usernames else None
+                preview_text = f"{uname} {msg}" if uname else msg
 
-                if self.usernames:
-                    uname = random.choice(self.usernames).strip()
-                    if uname:
-                        final_text = f"{uname} {msg}"
-                    else:
-                        final_text = msg
-                else:
-                    final_text = msg
-
-                # 4. Paste & Send (No mouse cursor hijacking)
-                self.status_changed.emit("Pasting & Sending...", "#3b82f6")
-                self.paste_and_send(final_text)
+                # 4. Direct Sending with Real Mention Tagging (No mouse jumping, zero clipboard pollution)
+                self.status_changed.emit("Sending...", "#3b82f6")
+                native_input.send_direct_message(message=msg, username=uname)
 
                 self.total_sent += 1
                 self.batch_count += 1
-                self.message_sent.emit(self.total_sent, final_text, self.batch_count)
+                self.message_sent.emit(self.total_sent, preview_text, self.batch_count)
 
-                # 5. Variable Random Delay Between Messages (Anti-Detection)
+                # 5. Randomized Anti-Ban Delay Between Messages
                 min_d = min(cfg.get("min_delay", 1.2), cfg.get("max_delay", 2.8))
                 max_d = max(cfg.get("min_delay", 1.2), cfg.get("max_delay", 2.8))
                 delay = random.uniform(min_d, max_d)
@@ -433,7 +491,8 @@ class FukFukSenderWindow(QMainWindow):
         self.worker = None
 
         self.setWindowTitle("⚡ FUK FUK Sender (Multi-Platform)")
-        self.resize(370, 620)
+        self.setMinimumSize(360, 560)
+        self.resize(420, 700)
         self.apply_window_flags()
 
         self.init_ui()
@@ -453,28 +512,180 @@ class FukFukSenderWindow(QMainWindow):
         except Exception as e:
             print(f"[WARN] Hotkey error: {e}")
 
+    def groupbox_style(self):
+        return """
+            QGroupBox {
+                background-color: #121214;
+                border: 1px solid #27272a;
+                border-radius: 8px;
+                margin-top: 6px;
+                padding-top: 26px;
+                padding-left: 10px;
+                padding-right: 10px;
+                padding-bottom: 10px;
+                font-size: 11px;
+                font-weight: 700;
+                color: #ffffff;
+            }
+            QGroupBox::title {
+                subcontrol-origin: padding;
+                subcontrol-position: top left;
+                left: 10px;
+                top: 8px;
+                background: transparent;
+                color: #ffffff;
+            }
+        """
+
+    def style_input(self, widget):
+        widget.setStyleSheet("""
+            QLineEdit, QComboBox {
+                background-color: #18181b;
+                color: #ffffff;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 5px 8px;
+                font-size: 11px;
+                selection-background-color: #ffffff;
+                selection-color: #000000;
+            }
+            QLineEdit:focus, QComboBox:focus {
+                border: 1px solid #ffffff;
+                background-color: #1c1c20;
+            }
+            QLineEdit:hover, QComboBox:hover {
+                border: 1px solid #3f3f46;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #18181b;
+                color: #ffffff;
+                border: 1px solid #3f3f46;
+                selection-background-color: #27272a;
+                selection-color: #ffffff;
+                padding: 4px;
+                outline: none;
+            }
+        """)
+
+    def style_spin(self, sb):
+        sb.setStyleSheet("""
+            QAbstractSpinBox {
+                background-color: #18181b;
+                color: #ffffff;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 4px 6px;
+                font-size: 11px;
+                font-weight: 600;
+                selection-background-color: #ffffff;
+                selection-color: #000000;
+            }
+            QAbstractSpinBox:focus {
+                border: 1px solid #ffffff;
+                background-color: #1c1c20;
+            }
+            QAbstractSpinBox:hover {
+                border: 1px solid #3f3f46;
+            }
+        """)
+
+    def style_secondary_btn(self, btn):
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #18181b;
+                color: #e4e4e7;
+                border: 1px solid #27272a;
+                border-radius: 6px;
+                padding: 5px 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #27272a;
+                color: #ffffff;
+                border: 1px solid #52525b;
+            }
+            QPushButton:pressed {
+                background-color: #09090b;
+            }
+        """)
+
     def init_ui(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: #09090b;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background-color: #09090b;
+                width: 6px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #27272a;
+                border-radius: 3px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #52525b;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+
         central = QWidget()
-        self.setCentralWidget(central)
-        central.setStyleSheet("background-color: #11121a; color: #e2e8f0; font-family: 'Segoe UI', sans-serif;")
+        scroll.setWidget(central)
+        self.setCentralWidget(scroll)
+        central.setStyleSheet("""
+            background-color: #09090b;
+            color: #e4e4e7;
+            font-family: 'Segoe UI', -apple-system, sans-serif;
+        """)
 
         layout = QVBoxLayout(central)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(10)
 
-        # Top Bar with Software Branding
+        # Top Bar
         top_bar = QHBoxLayout()
         title_box = QVBoxLayout()
+        title_box.setSpacing(2)
         title_lbl = QLabel("⚡ FUK FUK Sender")
-        title_lbl.setStyleSheet("font-size: 16px; font-weight: 800; color: #f43f5e;")
-        sub_lbl = QLabel("Multi-Platform (Insta • Discord • WA • Telegram)")
-        sub_lbl.setStyleSheet("font-size: 9px; color: #94a3b8;")
+        title_lbl.setStyleSheet("font-size: 16px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px;")
+        sub_lbl = QLabel("Auto-Detect • Window Lock • Smooth Direct Sender")
+        sub_lbl.setStyleSheet("font-size: 10px; color: #71717a;")
         title_box.addWidget(title_lbl)
         title_box.addWidget(sub_lbl)
 
         self.chk_top = QCheckBox("📌 Top")
         self.chk_top.setChecked(self.settings.get("always_on_top", True))
-        self.chk_top.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.chk_top.setStyleSheet("""
+            QCheckBox {
+                color: #a1a1aa;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            QCheckBox:hover {
+                color: #ffffff;
+            }
+            QCheckBox::indicator {
+                width: 13px;
+                height: 13px;
+                border: 1px solid #3f3f46;
+                border-radius: 3px;
+                background-color: #18181b;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #ffffff;
+                border: 1px solid #ffffff;
+            }
+        """)
         self.chk_top.stateChanged.connect(self.toggle_always_on_top)
 
         top_bar.addLayout(title_box)
@@ -484,18 +695,34 @@ class FukFukSenderWindow(QMainWindow):
 
         # Status & Statistics Card
         status_card = QFrame()
-        status_card.setStyleSheet("background-color: #181924; border: 1px solid #2b2d3d; border-radius: 8px; padding: 6px;")
+        status_card.setStyleSheet("""
+            QFrame {
+                background-color: #121214;
+                border: 1px solid #27272a;
+                border-radius: 8px;
+            }
+        """)
         sc_layout = QVBoxLayout(status_card)
-        sc_layout.setContentsMargins(8, 8, 8, 8)
-        sc_layout.setSpacing(4)
+        sc_layout.setContentsMargins(10, 8, 10, 8)
+        sc_layout.setSpacing(5)
 
         status_row = QHBoxLayout()
         lbl_status_tag = QLabel("Status:")
-        lbl_status_tag.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        lbl_status_tag.setStyleSheet("color: #71717a; font-size: 11px; font-weight: 600; border: none; background: transparent;")
+        
         self.lbl_status = QLabel("STOPPED")
-        self.lbl_status.setStyleSheet("color: #9ca3af; font-weight: bold; font-size: 12px;")
+        self.lbl_status.setStyleSheet("""
+            background-color: #18181b;
+            color: #71717a;
+            border: 1px solid #27272a;
+            border-radius: 4px;
+            padding: 2px 8px;
+            font-weight: 800;
+            font-size: 11px;
+        """)
+
         self.lbl_countdown = QLabel("")
-        self.lbl_countdown.setStyleSheet("color: #38bdf8; font-weight: 600; font-size: 11px;")
+        self.lbl_countdown.setStyleSheet("color: #ffffff; font-weight: 600; font-size: 11px; border: none; background: transparent;")
 
         status_row.addWidget(lbl_status_tag)
         status_row.addWidget(self.lbl_status)
@@ -505,16 +732,19 @@ class FukFukSenderWindow(QMainWindow):
 
         counts_row = QHBoxLayout()
         self.lbl_sent_total = QLabel("Sent: 0 msgs")
-        self.lbl_sent_total.setStyleSheet("color: #f1f5f9; font-size: 12px; font-weight: bold;")
+        self.lbl_sent_total.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: 700; border: none; background: transparent;")
+        
         self.lbl_batch_stat = QLabel("Batch: 0 / 35")
-        self.lbl_batch_stat.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_batch_stat.setStyleSheet("color: #a1a1aa; font-size: 11px; font-weight: 500; border: none; background: transparent;")
+        
         counts_row.addWidget(self.lbl_sent_total)
         counts_row.addStretch()
         counts_row.addWidget(self.lbl_batch_stat)
         sc_layout.addLayout(counts_row)
 
         self.lbl_last_msg = QLabel("Last sent: None")
-        self.lbl_last_msg.setStyleSheet("color: #64748b; font-size: 10px;")
+        self.lbl_last_msg.setWordWrap(True)
+        self.lbl_last_msg.setStyleSheet("color: #71717a; font-size: 10px; border: none; background: transparent;")
         sc_layout.addWidget(self.lbl_last_msg)
 
         layout.addWidget(status_card)
@@ -527,30 +757,43 @@ class FukFukSenderWindow(QMainWindow):
         self.update_button_style(False)
         layout.addWidget(self.btn_toggle)
 
-        # Section 1: Multi-Platform Target & Screen Layout Check
-        box_platform = QGroupBox("🌐 Target Platform & Screen Detection")
-        box_platform.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #2b2d3d;
-                border-radius: 8px;
-                margin-top: 8px;
-                padding-top: 10px;
-                font-size: 11px;
-                font-weight: 600;
-                color: #cbd5e1;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 4px;
-            }
-        """)
-        bp_layout = QVBoxLayout(box_platform)
-        bp_layout.setSpacing(6)
+        # SECTION 1: WINDOW LOCK & TARGET PLATFORM
+        box_window = QGroupBox("🎯 Target Window && Lock")
+        box_window.setStyleSheet(self.groupbox_style())
+        bw_layout = QVBoxLayout(box_window)
+        bw_layout.setContentsMargins(10, 14, 10, 10)
+        bw_layout.setSpacing(8)
+
+        win_row = QHBoxLayout()
+        win_row.setSpacing(6)
+        lbl_win = QLabel("Lock Window:")
+        lbl_win.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        lbl_win.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        self.combo_windows = QComboBox()
+        self.combo_windows.setMinimumWidth(80)
+        self.combo_windows.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.combo_windows.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.combo_windows.setMinimumContentsLength(8)
+        self.style_input(self.combo_windows)
+
+        btn_refresh = QPushButton("🔄 Refresh")
+        btn_refresh.setFixedWidth(84)
+        btn_refresh.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.style_secondary_btn(btn_refresh)
+        btn_refresh.clicked.connect(self.populate_open_windows)
+
+        win_row.addWidget(lbl_win)
+        win_row.addWidget(self.combo_windows, 1)
+        win_row.addWidget(btn_refresh)
+        bw_layout.addLayout(win_row)
 
         plat_row = QHBoxLayout()
+        plat_row.setSpacing(6)
         lbl_plat = QLabel("Platform:")
-        lbl_plat.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        lbl_plat.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        lbl_plat.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
         self.combo_platform = QComboBox()
         self.combo_platform.addItems([
             "All Platforms (Auto-Detect)",
@@ -563,82 +806,101 @@ class FukFukSenderWindow(QMainWindow):
         idx = self.combo_platform.findText(current_plat)
         if idx >= 0:
             self.combo_platform.setCurrentIndex(idx)
-        self.combo_platform.setStyleSheet("""
-            QComboBox {
-                background-color: #1e1f2b;
-                color: #38bdf8;
-                border: 1px solid #37394b;
-                border-radius: 6px;
-                padding: 4px 8px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-        """)
+        self.combo_platform.setMinimumWidth(80)
+        self.combo_platform.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.style_input(self.combo_platform)
         self.combo_platform.currentIndexChanged.connect(self.on_settings_change)
+
         plat_row.addWidget(lbl_plat)
         plat_row.addWidget(self.combo_platform, 1)
-        bp_layout.addLayout(plat_row)
+        bw_layout.addLayout(plat_row)
 
         self.chk_verify_layout = QCheckBox("Scan screen for chat input bar before sending")
         self.chk_verify_layout.setChecked(self.settings.get("verify_layout", True))
-        self.chk_verify_layout.setStyleSheet("color: #38bdf8; font-size: 10px; font-weight: bold;")
+        self.chk_verify_layout.setStyleSheet("""
+            QCheckBox {
+                color: #e4e4e7;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            QCheckBox:hover {
+                color: #ffffff;
+            }
+            QCheckBox::indicator {
+                width: 13px;
+                height: 13px;
+                border: 1px solid #3f3f46;
+                border-radius: 3px;
+                background-color: #18181b;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #ffffff;
+                border: 1px solid #ffffff;
+            }
+        """)
         self.chk_verify_layout.stateChanged.connect(self.on_settings_change)
-        bp_layout.addWidget(self.chk_verify_layout)
+        bw_layout.addWidget(self.chk_verify_layout)
 
-        lbl_plat_tip = QLabel("✓ Screen par kahin bhi Insta, Discord, WA ya Telegram dikhte hi send karega.\n✓ User ka mouse cursor bilkul move ya lock nahi hoga.")
-        lbl_plat_tip.setWordWrap(True)
-        lbl_plat_tip.setStyleSheet("color: #94a3b8; font-size: 9px;")
-        bp_layout.addWidget(lbl_plat_tip)
+        lbl_win_tip = QLabel(
+            "✓ Lock Window me aap apna open Chrome / WhatsApp / Telegram select kar sakte hain.\n"
+            "✓ Cursor smoothly chat box me send karega bina kisi error ke."
+        )
+        lbl_win_tip.setWordWrap(True)
+        lbl_win_tip.setStyleSheet("color: #71717a; font-size: 9px;")
+        bw_layout.addWidget(lbl_win_tip)
 
-        layout.addWidget(box_platform)
+        layout.addWidget(box_window)
 
-        # Section 2: Usernames Pool (Add One-by-One)
+        # SECTION 2: USERNAMES POOL (Add One-by-One)
         box_users = QGroupBox("👤 Usernames Pool (Add One-by-One)")
-        box_users.setStyleSheet(box_platform.styleSheet())
+        box_users.setStyleSheet(self.groupbox_style())
         bu_layout = QVBoxLayout(box_users)
-        bu_layout.setSpacing(6)
+        bu_layout.setContentsMargins(10, 14, 10, 10)
+        bu_layout.setSpacing(8)
 
         u_top_row = QHBoxLayout()
         self.lbl_user_count = QLabel("Usernames: 0 added")
-        self.lbl_user_count.setStyleSheet("color: #a855f7; font-weight: bold; font-size: 11px;")
-        btn_view_users = QPushButton("📋 View / Bulk Edit")
-        btn_view_users.setStyleSheet("""
-            QPushButton { background: #222538; color: #c084fc; border: 1px solid #3e4157; border-radius: 6px; padding: 3px 8px; font-weight: bold; font-size: 10px; }
-            QPushButton:hover { background: #2c3049; color: #e9d5ff; }
-        """)
+        self.lbl_user_count.setStyleSheet("color: #ffffff; font-weight: 700; font-size: 11px;")
+        
+        btn_view_users = QPushButton("📋 View / Edit")
+        btn_view_users.setMinimumWidth(80)
+        btn_view_users.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.style_secondary_btn(btn_view_users)
         btn_view_users.clicked.connect(self.open_usernames_editor)
+        
         u_top_row.addWidget(self.lbl_user_count, 1)
         u_top_row.addWidget(btn_view_users)
         bu_layout.addLayout(u_top_row)
 
         input_row = QHBoxLayout()
+        input_row.setSpacing(6)
         self.txt_username_input = QLineEdit()
         self.txt_username_input.setPlaceholderText("Type @username and press Enter...")
-        self.txt_username_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #1e1f2b;
-                color: #f1f5f9;
-                border: 1px solid #37394b;
-                border-radius: 6px;
-                padding: 4px 8px;
-                font-size: 11px;
-            }
-            QLineEdit:focus { border-color: #a855f7; }
-        """)
+        self.txt_username_input.setMinimumWidth(80)
+        self.txt_username_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.style_input(self.txt_username_input)
         self.txt_username_input.returnPressed.connect(self.add_username_single)
 
         btn_add_user = QPushButton("➕ Add")
+        btn_add_user.setFixedWidth(68)
+        btn_add_user.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         btn_add_user.setStyleSheet("""
             QPushButton {
-                background-color: #a855f7;
-                color: white;
-                border: none;
+                background-color: #ffffff;
+                color: #000000;
+                border: 1px solid #ffffff;
                 border-radius: 6px;
-                padding: 4px 12px;
-                font-weight: bold;
+                padding: 4px 10px;
+                font-weight: 700;
                 font-size: 11px;
             }
-            QPushButton:hover { background-color: #9333ea; }
+            QPushButton:hover {
+                background-color: #e4e4e7;
+                border-color: #e4e4e7;
+            }
+            QPushButton:pressed {
+                background-color: #d4d4d8;
+            }
         """)
         btn_add_user.clicked.connect(self.add_username_single)
 
@@ -646,151 +908,191 @@ class FukFukSenderWindow(QMainWindow):
         input_row.addWidget(btn_add_user)
         bu_layout.addLayout(input_row)
 
-        self.lbl_user_hint = QLabel("💡 0 usernames = message only. Usernames added = random username + msg")
-        self.lbl_user_hint.setStyleSheet("color: #64748b; font-size: 9px;")
+        self.lbl_user_hint = QLabel("💡 0 usernames = message only. Usernames added = Real mention pill + msg")
+        self.lbl_user_hint.setWordWrap(True)
+        self.lbl_user_hint.setStyleSheet("color: #71717a; font-size: 9px;")
         bu_layout.addWidget(self.lbl_user_hint)
 
         layout.addWidget(box_users)
 
-        # Section 3: Messages Pool
+        # SECTION 3: MESSAGES POOL
         box_msgs = QGroupBox("💬 Messages Pool")
-        box_msgs.setStyleSheet(box_platform.styleSheet())
-        bm_layout = QHBoxLayout(box_msgs)
-        bm_layout.setSpacing(8)
+        box_msgs.setStyleSheet(self.groupbox_style())
+        bm_msgs_layout = QHBoxLayout(box_msgs)
+        bm_msgs_layout.setContentsMargins(10, 14, 10, 10)
+        bm_msgs_layout.setSpacing(8)
 
         self.lbl_msg_count = QLabel("Messages: 5 loaded")
-        self.lbl_msg_count.setStyleSheet("color: #10b981; font-weight: bold; font-size: 11px;")
+        self.lbl_msg_count.setStyleSheet("color: #ffffff; font-weight: 700; font-size: 11px;")
+        
         btn_edit_msgs = QPushButton("📝 Edit Messages")
-        btn_edit_msgs.setStyleSheet("""
-            QPushButton { background: #222538; color: #38bdf8; border: 1px solid #3e4157; border-radius: 6px; padding: 4px 10px; font-weight: bold; font-size: 11px; }
-            QPushButton:hover { background: #2c3049; color: #7dd3fc; }
-        """)
+        btn_edit_msgs.setMinimumWidth(95)
+        btn_edit_msgs.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.style_secondary_btn(btn_edit_msgs)
         btn_edit_msgs.clicked.connect(self.open_messages_editor)
-        bm_layout.addWidget(self.lbl_msg_count, 1)
-        bm_layout.addWidget(btn_edit_msgs)
+        
+        bm_msgs_layout.addWidget(self.lbl_msg_count, 1)
+        bm_msgs_layout.addWidget(btn_edit_msgs)
         layout.addWidget(box_msgs)
 
         self.refresh_pool_counts()
 
-        # Section 4: Timing & Anti-Ban Break
+        # SECTION 4: TIMING & ANTI-BAN
         box_timing = QGroupBox("⏱ Send Delay Settings (Anti-Detection)")
-        box_timing.setStyleSheet(box_platform.styleSheet())
+        box_timing.setStyleSheet(self.groupbox_style())
         bt_layout = QVBoxLayout(box_timing)
-        bt_layout.setSpacing(6)
+        bt_layout.setContentsMargins(10, 14, 10, 10)
+        bt_layout.setSpacing(8)
 
-        delays_row = QHBoxLayout()
+        grid_timing = QGridLayout()
+        grid_timing.setHorizontalSpacing(10)
+        grid_timing.setVerticalSpacing(4)
+
         lbl_min = QLabel("Min Delay:")
-        lbl_min.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        lbl_min.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         self.spin_min = QDoubleSpinBox()
         self.spin_min.setRange(0.2, 30.0)
         self.spin_min.setSingleStep(0.1)
         self.spin_min.setDecimals(2)
         self.spin_min.setValue(self.settings.get("min_delay", 1.2))
         self.spin_min.setSuffix(" s")
+        self.spin_min.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.style_spin(self.spin_min)
         self.spin_min.valueChanged.connect(self.on_settings_change)
 
         lbl_max = QLabel("Max Delay:")
-        lbl_max.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        lbl_max.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         self.spin_max = QDoubleSpinBox()
         self.spin_max.setRange(0.5, 60.0)
         self.spin_max.setSingleStep(0.1)
         self.spin_max.setDecimals(2)
         self.spin_max.setValue(self.settings.get("max_delay", 2.8))
         self.spin_max.setSuffix(" s")
+        self.spin_max.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.style_spin(self.spin_max)
         self.spin_max.valueChanged.connect(self.on_settings_change)
 
-        delays_row.addWidget(lbl_min)
-        delays_row.addWidget(self.spin_min)
-        delays_row.addSpacing(6)
-        delays_row.addWidget(lbl_max)
-        delays_row.addWidget(self.spin_max)
-        bt_layout.addLayout(delays_row)
+        grid_timing.addWidget(lbl_min, 0, 0)
+        grid_timing.addWidget(self.spin_min, 1, 0)
+        grid_timing.addWidget(lbl_max, 0, 1)
+        grid_timing.addWidget(self.spin_max, 1, 1)
 
-        self.lbl_ms_hint = QLabel("")
-        self.lbl_ms_hint.setStyleSheet("color: #64748b; font-size: 10px;")
-        bt_layout.addWidget(self.lbl_ms_hint)
-        self.update_ms_hint()
-
-        break_row = QHBoxLayout()
         lbl_batch = QLabel("Break every:")
-        lbl_batch.setStyleSheet("color: #94a3b8; font-size: 10px;")
+        lbl_batch.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         self.spin_batch = QSpinBox()
         self.spin_batch.setRange(5, 500)
         self.spin_batch.setValue(self.settings.get("batch_limit", 35))
         self.spin_batch.setSuffix(" msgs")
+        self.spin_batch.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.style_spin(self.spin_batch)
         self.spin_batch.valueChanged.connect(self.on_settings_change)
 
         lbl_dur = QLabel("Rest for:")
-        lbl_dur.setStyleSheet("color: #94a3b8; font-size: 10px;")
+        lbl_dur.setStyleSheet("color: #a1a1aa; font-size: 11px;")
         self.spin_duration = QSpinBox()
         self.spin_duration.setRange(10, 3600)
         self.spin_duration.setSingleStep(15)
         self.spin_duration.setValue(self.settings.get("break_duration_s", 180))
         self.spin_duration.setSuffix(" sec")
+        self.spin_duration.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.style_spin(self.spin_duration)
         self.spin_duration.valueChanged.connect(self.on_settings_change)
 
-        break_row.addWidget(lbl_batch)
-        break_row.addWidget(self.spin_batch)
-        break_row.addSpacing(6)
-        break_row.addWidget(lbl_dur)
-        break_row.addWidget(self.spin_duration)
-        bt_layout.addLayout(break_row)
+        grid_timing.addWidget(lbl_batch, 2, 0)
+        grid_timing.addWidget(self.spin_batch, 3, 0)
+        grid_timing.addWidget(lbl_dur, 2, 1)
+        grid_timing.addWidget(self.spin_duration, 3, 1)
+
+        grid_timing.setColumnStretch(0, 1)
+        grid_timing.setColumnStretch(1, 1)
+
+        bt_layout.addLayout(grid_timing)
+
+        self.lbl_ms_hint = QLabel("")
+        self.lbl_ms_hint.setStyleSheet("color: #71717a; font-size: 10px;")
+        bt_layout.addWidget(self.lbl_ms_hint)
+        self.update_ms_hint()
 
         layout.addWidget(box_timing)
 
-        hint = QLabel("💡 Chat box par ek baar click karein, phir START dabayein.\n🚨 Emergency Stop: Mouse ko top-left corner par le jayein")
+        hint = QLabel("💡 Chat box par ek baar click karein, phir START dabayein.\n🚨 Emergency Stop: Mouse ko top-left corner le jayein ya press F6")
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #64748b; font-size: 10px; padding: 2px;")
+        hint.setStyleSheet("color: #71717a; font-size: 10px; padding: 2px;")
         layout.addWidget(hint)
 
-    def style_spin(self, sb):
-        sb.setStyleSheet("""
-            QAbstractSpinBox {
-                background-color: #1e1f2b;
-                color: #f1f5f9;
-                border: 1px solid #37394b;
-                border-radius: 5px;
-                padding: 3px 6px;
-                font-size: 11px;
-                font-weight: 600;
-            }
-        """)
+        self.populate_open_windows()
 
     def update_ms_hint(self):
         mn = int(self.spin_min.value() * 1000)
         mx = int(self.spin_max.value() * 1000)
         self.lbl_ms_hint.setText(f"Random delay: {mn} ms se {mx} ms per message")
 
+    def populate_open_windows(self):
+        """Populates open windows into the combo box on launch or manual refresh only."""
+        current_data = self.combo_windows.currentData() if hasattr(self, 'combo_windows') else "auto"
+
+        self.combo_windows.blockSignals(True)
+        self.combo_windows.clear()
+        self.combo_windows.addItem("⚡ Active Window (Auto-Detect)", "auto")
+
+        open_wins = window_detector.get_all_open_windows()
+        selected_idx = 0
+
+        for i, w in enumerate(open_wins):
+            title = w["title"]
+            hwnd = w["hwnd"]
+            app_type = w["app_type"]
+
+            prefix = "💬 " if app_type == "Chat" else ("🌐 " if app_type == "Browser" else "🪟 ")
+            display_title = title if len(title) <= 26 else title[:23] + "..."
+            self.combo_windows.addItem(f"{prefix}{display_title}", hwnd)
+
+            if current_data and current_data == hwnd:
+                selected_idx = i + 1
+
+        self.combo_windows.setCurrentIndex(selected_idx)
+        self.combo_windows.blockSignals(False)
+
     def update_button_style(self, running: bool):
         if running:
-            self.btn_toggle.setText("⏹ STOP BOT (F6)")
+            self.btn_toggle.setText("⏹  STOP BOT (F6)")
             self.btn_toggle.setStyleSheet("""
                 QPushButton {
-                    background-color: #ef4444;
-                    color: white;
-                    border: none;
+                    background-color: #09090b;
+                    color: #ffffff;
+                    border: 2px solid #ffffff;
                     border-radius: 8px;
-                    font-size: 14px;
-                    font-weight: bold;
+                    font-size: 13px;
+                    font-weight: 800;
+                    letter-spacing: 0.5px;
                 }
-                QPushButton:hover { background-color: #dc2626; }
+                QPushButton:hover {
+                    background-color: #18181b;
+                    border-color: #e4e4e7;
+                }
+                QPushButton:pressed {
+                    background-color: #27272a;
+                }
             """)
         else:
-            self.btn_toggle.setText("▶ START BOT (F6)")
+            self.btn_toggle.setText("▶  START BOT (F6)")
             self.btn_toggle.setStyleSheet("""
                 QPushButton {
-                    background-color: #10b981;
-                    color: white;
-                    border: none;
+                    background-color: #ffffff;
+                    color: #000000;
+                    border: 1px solid #ffffff;
                     border-radius: 8px;
-                    font-size: 14px;
-                    font-weight: bold;
+                    font-size: 13px;
+                    font-weight: 800;
+                    letter-spacing: 0.5px;
                 }
-                QPushButton:hover { background-color: #059669; }
+                QPushButton:hover {
+                    background-color: #e4e4e7;
+                    border-color: #e4e4e7;
+                }
+                QPushButton:pressed {
+                    background-color: #d4d4d8;
+                }
             """)
 
     def add_username_single(self):
@@ -808,22 +1110,25 @@ class FukFukSenderWindow(QMainWindow):
             save_usernames_pool(current_users)
             self.refresh_pool_counts()
             self.lbl_user_hint.setText(f"✓ Added {text} (Total: {len(current_users)})")
-            self.lbl_user_hint.setStyleSheet("color: #10b981; font-size: 10px; font-weight: bold;")
+            self.lbl_user_hint.setStyleSheet("color: #ffffff; font-size: 10px; font-weight: 700;")
         else:
             self.lbl_user_hint.setText(f"⚠️ {text} is already in the list.")
-            self.lbl_user_hint.setStyleSheet("color: #f59e0b; font-size: 10px;")
+            self.lbl_user_hint.setStyleSheet("color: #a1a1aa; font-size: 10px;")
 
         self.txt_username_input.clear()
         self.txt_username_input.setFocus()
 
     def get_config(self):
+        locked_hwnd = self.combo_windows.currentData() if hasattr(self, 'combo_windows') else "auto"
+
         return {
+            "locked_hwnd": locked_hwnd,
             "target_platform": self.combo_platform.currentText(),
+            "verify_layout": self.chk_verify_layout.isChecked(),
             "min_delay": self.spin_min.value(),
             "max_delay": self.spin_max.value(),
             "batch_limit": self.spin_batch.value(),
             "break_duration_s": self.spin_duration.value(),
-            "verify_layout": self.chk_verify_layout.isChecked(),
             "always_on_top": self.chk_top.isChecked()
         }
 
@@ -874,7 +1179,7 @@ class FukFukSenderWindow(QMainWindow):
             self.worker.stop()
             self.update_button_style(False)
             self.lbl_status.setText("STOPPING...")
-            self.lbl_status.setStyleSheet("color: #f59e0b; font-weight: bold; font-size: 12px;")
+            self.lbl_status.setStyleSheet("background-color: #27272a; color: #ffffff; border: 1px solid #3f3f46; border-radius: 4px; padding: 2px 8px; font-weight: 800; font-size: 11px;")
         else:
             self.worker = SenderWorker(self.get_config, self)
             self.worker.status_changed.connect(self.on_worker_status)
@@ -885,8 +1190,16 @@ class FukFukSenderWindow(QMainWindow):
             self.update_button_style(True)
 
     def on_worker_status(self, text, color):
-        self.lbl_status.setText(text.upper())
-        self.lbl_status.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 12px;")
+        clean_text = text.upper()
+        self.lbl_status.setText(clean_text)
+        if "STOPPED" in clean_text:
+            self.lbl_status.setStyleSheet("background-color: #18181b; color: #71717a; border: 1px solid #27272a; border-radius: 4px; padding: 2px 8px; font-weight: 800; font-size: 11px;")
+        elif any(k in clean_text for k in ["REST", "WAIT", "STOPPING"]):
+            self.lbl_status.setStyleSheet("background-color: #27272a; color: #e4e4e7; border: 1px solid #3f3f46; border-radius: 4px; padding: 2px 8px; font-weight: 800; font-size: 11px;")
+        elif any(k in clean_text for k in ["ERROR", "FAILSAFE", "NO MESSAGES"]):
+            self.lbl_status.setStyleSheet("background-color: #ffffff; color: #000000; border: 1px solid #ffffff; border-radius: 4px; padding: 2px 8px; font-weight: 800; font-size: 11px;")
+        else:
+            self.lbl_status.setStyleSheet("background-color: #ffffff; color: #000000; border: 1px solid #ffffff; border-radius: 4px; padding: 2px 8px; font-weight: 800; font-size: 11px;")
 
     def on_worker_message_sent(self, total_sent, msg, batch_count):
         self.lbl_sent_total.setText(f"Sent: {total_sent} msgs")
@@ -902,7 +1215,7 @@ class FukFukSenderWindow(QMainWindow):
     def on_worker_finished(self):
         self.update_button_style(False)
         self.lbl_status.setText("STOPPED")
-        self.lbl_status.setStyleSheet("color: #9ca3af; font-weight: bold; font-size: 12px;")
+        self.lbl_status.setStyleSheet("background-color: #18181b; color: #71717a; border: 1px solid #27272a; border-radius: 4px; padding: 2px 8px; font-weight: 800; font-size: 11px;")
         if hasattr(self, 'lbl_countdown'):
             self.lbl_countdown.setText("")
 

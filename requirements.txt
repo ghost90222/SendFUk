@@ -5,3 +5,4 @@ pyperclip>=1.8.0
 keyboard>=0.13.5
 pynput>=1.8.1
 Pillow>=10.0.0
+playwright>=1.40.0
